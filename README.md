@@ -59,3 +59,28 @@ for one-off overrides, e.g. during testing):
 ```sh
 journalctl --user -u sudo-watch.service -f
 ```
+
+## Porting to macOS
+
+This is Linux-only as written — it leans on `/proc`-backed `pgrep`/`ps`,
+freedesktop `notify-send`, PulseAudio/PipeWire's `paplay`, and a
+`systemd --user` service. The core polling loop (`bin/sudo-watch.sh`)
+translates fine; only three pieces need swapping:
+
+- **Notifications** — replace the `notify-send` call in `send_alert()` with
+  `osascript -e 'display notification "…" with title "…"'`, or use
+  [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) for
+  more control (custom sound, click-to-focus).
+- **Sound** — replace `paplay --volume=… "$SOUND"` with `afplay -v <0-1>
+  "$SOUND"` (note `afplay`'s volume is a 0–1 float, not a percent like
+  `paplay`'s 0–65536 scale — you'll need to rescale `PAPLAY_VOLUME`
+  accordingly). System sounds live under `/System/Library/Sounds/*.aiff`.
+- **Service management** — swap the `systemd/sudo-watch.service` unit for a
+  `launchd` `.plist` in `~/Library/LaunchAgents/`, loaded with
+  `launchctl load -w`. `sudo-watchctl status`'s
+  `systemctl --user is-active` check would become a `launchctl list | grep
+  sudo-watch` check.
+
+`is_pending()` (no child process yet ⇒ still waiting on a password) and the
+`sudo-watchctl` config-file/live-reload design need no changes — `pgrep -P`
+and `ps -o cmd=` behave the same on macOS.
