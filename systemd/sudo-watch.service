@@ -1,0 +1,11 @@
+[Unit]
+Description=Ping when a sudo/pkexec password prompt goes unanswered
+
+[Service]
+Type=simple
+ExecStart=%h/Work/dev/sudo-watch/bin/sudo-watch.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
