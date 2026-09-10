@@ -7,6 +7,8 @@ POLL_INTERVAL="${SUDO_WATCH_POLL_INTERVAL:-2}"
 ALERT_THRESHOLD="${SUDO_WATCH_ALERT_THRESHOLD:-20}"
 REPEAT_INTERVAL="${SUDO_WATCH_REPEAT_INTERVAL:-10}"
 SOUND="${SUDO_WATCH_SOUND:-/usr/share/sounds/freedesktop/stereo/dialog-warning.oga}"
+VOLUME_PERCENT="${SUDO_WATCH_VOLUME:-100}"
+PAPLAY_VOLUME=$(( VOLUME_PERCENT * 65536 / 100 ))
 
 declare -A first_seen
 declare -A last_alert
@@ -25,7 +27,7 @@ send_alert() {
 	notify-send -u critical -a "sudo-watch" \
 		"Waiting on your password" \
 		"${cmd} (pid ${pid}) has been waiting ${elapsed}s" 2>/dev/null
-	[[ -f "$SOUND" ]] && paplay "$SOUND" 2>/dev/null &
+	[[ -f "$SOUND" ]] && paplay --volume="$PAPLAY_VOLUME" "$SOUND" 2>/dev/null &
 }
 
 while true; do

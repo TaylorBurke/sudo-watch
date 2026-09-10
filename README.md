@@ -29,6 +29,8 @@ Environment variables (set via a systemd drop-in or edit the unit):
 - `SUDO_WATCH_REPEAT_INTERVAL` — seconds between repeat alerts (default 10)
 - `SUDO_WATCH_SOUND` — path to the sound file to play (default freedesktop
   dialog-warning)
+- `SUDO_WATCH_VOLUME` — alert volume as a percent, e.g. `50` for half, `150`
+  for 150% (default 100)
 
 ## Logs
 
