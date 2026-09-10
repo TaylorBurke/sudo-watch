@@ -16,9 +16,14 @@ it's resolved. This avoids false positives for cached-credential or
 ## Install
 
 ```sh
-systemctl --user link ~/Work/dev/sudo-watch/systemd/sudo-watch.service
-systemctl --user enable --now sudo-watch.service
+git clone https://github.com/TaylorBurke/sudo-watch.git
+cd sudo-watch
+./install.sh
 ```
+
+This templates the systemd unit with the path you cloned into (so it works
+regardless of where that is), enables it, and symlinks `sudo-watchctl` into
+`~/.local/bin`.
 
 ## Configure
 
