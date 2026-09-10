@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Convenience CLI for adjusting sudo-watch settings without hand-editing
+# its config file. Changes apply live (next poll tick), no restart needed.
+set -euo pipefail
+
+CONFIG_FILE="${SUDO_WATCH_CONFIG:-$HOME/.config/sudo-watch/config}"
+DEFAULT_SOUND="/usr/share/sounds/freedesktop/stereo/dialog-warning.oga"
+
+usage() {
+	cat <<EOF
+Usage: sudo-watchctl <command> [args]
+
+Commands:
+  volume [percent]      Get or set base alert volume (e.g. 50, 100, 150)
+  escalate [on|off]     Get or set whether volume ramps up on repeat alerts
+  volume-step [n]       Get or set percent added per repeat alert (escalate)
+  volume-max [percent]  Get or set the volume cap when escalating
+  threshold [seconds]   Get or set seconds before the first alert
+  repeat [seconds]      Get or set seconds between repeat alerts
+  sound [path]          Get or set the alert sound file
+  status                Show current settings and service state
+  test                  Play the current alert sound at current volume
+EOF
+}
+
+ensure_config() {
+	mkdir -p "$(dirname "$CONFIG_FILE")"
+	[[ -f "$CONFIG_FILE" ]] || : > "$CONFIG_FILE"
+}
+
+get_kv() {
+	local key="$1" default="$2"
+	[[ -f "$CONFIG_FILE" ]] || { echo "$default"; return; }
+	local val
+	val="$(grep -E "^${key}=" "$CONFIG_FILE" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+	echo "${val:-$default}"
+}
+
+set_kv() {
+	local key="$1" value="$2"
+	ensure_config
+	if grep -qE "^${key}=" "$CONFIG_FILE" 2>/dev/null; then
+		sed -i "s|^${key}=.*|${key}=${value}|" "$CONFIG_FILE"
+	else
+		echo "${key}=${value}" >> "$CONFIG_FILE"
+	fi
+}
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+	volume)
+		if [[ $# -eq 0 ]]; then
+			get_kv SUDO_WATCH_VOLUME 100
+		else
+			[[ "$1" =~ ^[0-9]+$ ]] || { echo "volume must be a non-negative integer percent" >&2; exit 1; }
+			set_kv SUDO_WATCH_VOLUME "$1"
+			echo "Alert volume set to ${1}%"
+		fi
+		;;
+	escalate)
+		if [[ $# -eq 0 ]]; then
+			[[ "$(get_kv SUDO_WATCH_VOLUME_ESCALATE 0)" == "1" ]] && echo "on" || echo "off"
+		else
+			case "$1" in
+				on) set_kv SUDO_WATCH_VOLUME_ESCALATE 1; echo "Volume escalation on" ;;
+				off) set_kv SUDO_WATCH_VOLUME_ESCALATE 0; echo "Volume escalation off" ;;
+				*) echo "escalate expects 'on' or 'off'" >&2; exit 1 ;;
+			esac
+		fi
+		;;
+	volume-step)
+		if [[ $# -eq 0 ]]; then
+			get_kv SUDO_WATCH_VOLUME_STEP 10
+		else
+			[[ "$1" =~ ^[0-9]+$ ]] || { echo "volume-step must be a non-negative integer percent" >&2; exit 1; }
+			set_kv SUDO_WATCH_VOLUME_STEP "$1"
+			echo "Volume step set to ${1}%"
+		fi
+		;;
+	volume-max)
+		if [[ $# -eq 0 ]]; then
+			get_kv SUDO_WATCH_VOLUME_MAX 150
+		else
+			[[ "$1" =~ ^[0-9]+$ ]] || { echo "volume-max must be a non-negative integer percent" >&2; exit 1; }
+			set_kv SUDO_WATCH_VOLUME_MAX "$1"
+			echo "Volume cap set to ${1}%"
+		fi
+		;;
+	threshold)
+		if [[ $# -eq 0 ]]; then
+			get_kv SUDO_WATCH_ALERT_THRESHOLD 20
+		else
+			[[ "$1" =~ ^[0-9]+$ ]] || { echo "threshold must be a non-negative integer (seconds)" >&2; exit 1; }
+			set_kv SUDO_WATCH_ALERT_THRESHOLD "$1"
+			echo "Alert threshold set to ${1}s"
+		fi
+		;;
+	repeat)
+		if [[ $# -eq 0 ]]; then
+			get_kv SUDO_WATCH_REPEAT_INTERVAL 10
+		else
+			[[ "$1" =~ ^[0-9]+$ ]] || { echo "repeat interval must be a non-negative integer (seconds)" >&2; exit 1; }
+			set_kv SUDO_WATCH_REPEAT_INTERVAL "$1"
+			echo "Repeat interval set to ${1}s"
+		fi
+		;;
+	sound)
+		if [[ $# -eq 0 ]]; then
+			get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND"
+		else
+			[[ -f "$1" ]] || { echo "no such file: $1" >&2; exit 1; }
+			set_kv SUDO_WATCH_SOUND "$1"
+			echo "Alert sound set to $1"
+		fi
+		;;
+	status)
+		echo "Config file:  $CONFIG_FILE"
+		echo "Volume:       $(get_kv SUDO_WATCH_VOLUME 100)%"
+		if [[ "$(get_kv SUDO_WATCH_VOLUME_ESCALATE 0)" == "1" ]]; then
+			echo "Escalate:     on (+$(get_kv SUDO_WATCH_VOLUME_STEP 10)% per repeat, cap $(get_kv SUDO_WATCH_VOLUME_MAX 150)%)"
+		else
+			echo "Escalate:     off"
+		fi
+		echo "Threshold:    $(get_kv SUDO_WATCH_ALERT_THRESHOLD 20)s"
+		echo "Repeat every: $(get_kv SUDO_WATCH_REPEAT_INTERVAL 10)s"
+		echo "Sound:        $(get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND")"
+		if systemctl --user is-active --quiet sudo-watch.service 2>/dev/null; then
+			echo "Service:      active"
+		else
+			echo "Service:      not active"
+		fi
+		;;
+	test)
+		vol="$(get_kv SUDO_WATCH_VOLUME 100)"
+		snd="$(get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND")"
+		paplay --volume="$(( vol * 65536 / 100 ))" "$snd"
+		;;
+	-h|--help|help)
+		usage
+		;;
+	*)
+		echo "Unknown command: $cmd" >&2
+		usage >&2
+		exit 1
+		;;
+esac
