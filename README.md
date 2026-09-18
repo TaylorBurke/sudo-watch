@@ -15,6 +15,19 @@ it's resolved. This avoids false positives for cached-credential or
 
 ## Install
 
+### As an Omarchy plugin (Quickshell service)
+
+```sh
+omarchy plugin add https://github.com/TaylorBurke/sudo-watch.git --enable
+```
+
+This runs the watcher as a Quickshell-supervised `service` plugin inside
+`omarchy-shell` — no systemd unit involved. `sudo-watchctl` isn't put on
+`PATH` by this path; configure via `~/.config/sudo-watch/config` directly,
+or run the standalone install below instead/alongside.
+
+### Standalone (systemd --user service)
+
 ```sh
 git clone https://github.com/TaylorBurke/sudo-watch.git
 cd sudo-watch
@@ -64,6 +77,26 @@ for one-off overrides, e.g. during testing):
 ```sh
 journalctl --user -u sudo-watch.service -f
 ```
+
+## Remove
+
+Omarchy plugin install:
+
+```sh
+omarchy plugin remove taylorburke.sudo-watch
+```
+
+Standalone install:
+
+```sh
+cd sudo-watch   # the directory you cloned into
+./uninstall.sh
+```
+
+This stops and disables the systemd service and removes the
+`sudo-watchctl` symlink. It leaves `~/.config/sudo-watch/config` in
+place; the script prints the command to remove that too if you want a
+clean slate.
 
 ## Porting to macOS
 

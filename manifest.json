@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "taylorburke.sudo-watch",
+  "name": "Sudo Watch",
+  "version": "1.0.0",
+  "author": "Taylor Burke",
+  "description": "Alerts you with a notification and sound when a sudo or pkexec prompt has been waiting unanswered.",
+  "license": "MIT",
+  "kinds": ["service"],
+  "entryPoints": { "service": "Service.qml" }
+}
