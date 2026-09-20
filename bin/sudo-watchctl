@@ -127,7 +127,9 @@ case "$cmd" in
 		echo "Repeat every: $(get_kv SUDO_WATCH_REPEAT_INTERVAL 10)s"
 		echo "Sound:        $(get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND")"
 		if systemctl --user is-active --quiet sudo-watch.service 2>/dev/null; then
-			echo "Service:      active"
+			echo "Service:      active (systemd)"
+		elif pgrep -f 'bin/sudo-watch\.sh' >/dev/null 2>&1; then
+			echo "Service:      active (plugin)"
 		else
 			echo "Service:      not active"
 		fi
