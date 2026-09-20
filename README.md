@@ -22,9 +22,16 @@ omarchy plugin add https://github.com/TaylorBurke/sudo-watch.git --enable
 ```
 
 This runs the watcher as a Quickshell-supervised `service` plugin inside
-`omarchy-shell` — no systemd unit involved. `sudo-watchctl` isn't put on
-`PATH` by this path; configure via `~/.config/sudo-watch/config` directly,
-or run the standalone install below instead/alongside.
+`omarchy-shell` — no systemd unit involved. This path doesn't put
+`sudo-watchctl` on `PATH` for you, but it's just a config-file editor and
+works regardless of which install runs the watcher, so you can still use it:
+
+```sh
+ln -s ~/.config/omarchy/plugins/taylorburke.sudo-watch/bin/sudo-watchctl ~/.local/bin/sudo-watchctl
+```
+
+(assumes `~/.local/bin` is on `PATH`, which it is by default on Omarchy).
+Or hand-edit `~/.config/sudo-watch/config` directly — same effect.
 
 ### Standalone (systemd --user service)
 
@@ -72,11 +79,31 @@ for one-off overrides, e.g. during testing):
   (default 10)
 - `SUDO_WATCH_VOLUME_MAX` — volume cap when escalating (default 150)
 
+Volume here is a linear percentage passed straight to `paplay --volume`
+(software gain), not perceived loudness, which is logarithmic — going from
+100% to 150% is only about +3.5dB, and human hearing typically needs ~3dB to
+reliably notice a change at all. The 10%-per-repeat default is barely
+audible; if you want repeats to actually sound louder, use a step of 30% or
+more (e.g. `sudo-watchctl volume-step 30`).
+
 ## Logs
+
+Standalone (systemd) install:
 
 ```sh
 journalctl --user -u sudo-watch.service -f
 ```
+
+Omarchy plugin install (no dedicated systemd unit — it logs through
+`omarchy-shell`):
+
+```sh
+journalctl --user -f | grep sudo-watch
+```
+
+`sudo-watchctl status` reports which one is actually running the watcher
+(`active (systemd)` or `active (plugin)`), which matters if you've tried
+both at different times.
 
 ## Remove
 
