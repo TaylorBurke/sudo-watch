@@ -67,17 +67,18 @@ Settings live in `~/.config/sudo-watch/config` as `SUDO_WATCH_*=value` lines,
 the same names as the environment variables below (which are still honored
 for one-off overrides, e.g. during testing):
 
-- `SUDO_WATCH_POLL_INTERVAL` — poll frequency in seconds (default 2)
-- `SUDO_WATCH_ALERT_THRESHOLD` — seconds before first alert (default 20)
-- `SUDO_WATCH_REPEAT_INTERVAL` — seconds between repeat alerts (default 10)
-- `SUDO_WATCH_SOUND` — path to the sound file to play (default freedesktop
-  dialog-warning)
-- `SUDO_WATCH_VOLUME` — base alert volume as a percent (default 100)
-- `SUDO_WATCH_VOLUME_ESCALATE` — `1` to ramp volume up on repeat alerts,
-  `0` to keep it flat (default 0)
-- `SUDO_WATCH_VOLUME_STEP` — percent added per repeat alert when escalating
-  (default 10)
-- `SUDO_WATCH_VOLUME_MAX` — volume cap when escalating (default 150)
+| Variable | Default | Meaning |
+|---|---|---|
+| `SUDO_WATCH_POLL_INTERVAL` | `2` | Poll frequency, in seconds |
+| `SUDO_WATCH_ALERT_THRESHOLD` | `20` | Seconds waiting before the first alert |
+| `SUDO_WATCH_REPEAT_INTERVAL` | `10` | Seconds between repeat alerts |
+| `SUDO_WATCH_SOUND` | `/usr/share/sounds/freedesktop/stereo/dialog-warning.oga` | Alert sound file |
+| `SUDO_WATCH_VOLUME` | `100` | Base alert volume, as a percent |
+| `SUDO_WATCH_VOLUME_ESCALATE` | `0` | `1` ramps volume up on repeat alerts, `0` keeps it flat |
+| `SUDO_WATCH_VOLUME_STEP` | `10` | Percent added per repeat alert while escalating |
+| `SUDO_WATCH_VOLUME_MAX` | `150` | Volume cap while escalating |
+| `SUDO_WATCH_CONFIG` | `~/.config/sudo-watch/config` | Path to the config file itself |
+| `SUDO_WATCH_LOCK` | `$XDG_RUNTIME_DIR/sudo-watch.lock` (falls back to `/tmp` if unset) | Path to the single-instance lock file |
 
 Volume here is a linear percentage passed straight to `paplay --volume`
 (software gain), not perceived loudness, which is logarithmic — going from
