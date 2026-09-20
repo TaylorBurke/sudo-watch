@@ -5,6 +5,22 @@ set -uo pipefail
 
 CONFIG_FILE="${SUDO_WATCH_CONFIG:-$HOME/.config/sudo-watch/config}"
 
+# Only one instance should actively poll/alert at a time. Without this,
+# installing both the Omarchy plugin and the standalone systemd service
+# (the README lists this as a supported "alongside" combo) runs two
+# independent watchers against the same sudo/pkexec processes, so every
+# alert fires twice. Block on a lock instead of exiting on contention: if
+# the instance currently holding it stops, this one takes over rather than
+# needing a manual restart, and Restart=on-failure / the Quickshell plugin's
+# onExited handler never see a "failure" to loop on.
+LOCK_FILE="${SUDO_WATCH_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/sudo-watch.lock}"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+	echo "sudo-watch: another instance is already watching (lock: $LOCK_FILE); waiting to take over" >&2
+	flock 9
+	echo "sudo-watch: acquired lock, now active" >&2
+fi
+
 declare -A first_seen
 declare -A last_alert
 declare -A alert_count
