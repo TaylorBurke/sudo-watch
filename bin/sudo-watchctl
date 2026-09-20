@@ -46,10 +46,11 @@ set_kv() {
 	fi
 }
 
-cmd="${1:-status}"
-shift || true
+main() {
+	local cmd="${1:-status}"
+	shift || true
 
-case "$cmd" in
+	case "$cmd" in
 	volume)
 		if [[ $# -eq 0 ]]; then
 			get_kv SUDO_WATCH_VOLUME 100
@@ -147,4 +148,11 @@ case "$cmd" in
 		usage >&2
 		exit 1
 		;;
-esac
+	esac
+}
+
+# Only run when executed directly, not when sourced (e.g. by tests) — lets
+# tests load usage/ensure_config/get_kv/set_kv/main in isolation.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+	main "$@"
+fi

@@ -126,6 +126,18 @@ This stops and disables the systemd service and removes the
 place; the script prints the command to remove that too if you want a
 clean slate.
 
+## Testing
+
+Tests live in `tests/` (bats-core) and are inert for anyone who installs
+the plugin — nothing in `manifest.json` or `Service.qml` references them,
+so they never run outside development.
+
+```sh
+sudo pacman -S --needed bats bats-assert bats-support bats-file kcov jq
+bats tests/                 # run the suite
+./tests/coverage.sh         # run under kcov, report line coverage for bin/
+```
+
 ## Porting to macOS
 
 This is Linux-only as written — it leans on `/proc`-backed `pgrep`/`ps`,
