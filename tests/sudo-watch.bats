@@ -277,6 +277,47 @@ SH
 	[ "$(sed -n 2p "$log")" = "--" ]
 }
 
+@test "poll_once: stops alerting after MAX_ALERTS (default 10) for one prompt" {
+	pgrep_pending_4242
+	local notify_log="$BATS_TEST_TMPDIR/notify.log"
+	stub notify-send <<SH
+#!/usr/bin/env bash
+echo x >> "$notify_log"
+SH
+	SOUND=/nonexistent
+	poll_once                      # t=1000 first seen
+	for i in $(seq 1 15); do
+		FAKE_NOW=$((1021 + (i - 1) * 11))
+		poll_once
+	done
+	[ "$(wc -l <"$notify_log")" -eq 10 ]
+	[ "${alert_count[4242]}" = "10" ]
+}
+
+@test "poll_once: MAX_ALERTS=0 means unlimited" {
+	pgrep_pending_4242
+	local notify_log="$BATS_TEST_TMPDIR/notify.log"
+	stub notify-send <<SH
+#!/usr/bin/env bash
+echo x >> "$notify_log"
+SH
+	SOUND=/nonexistent
+	MAX_ALERTS=0
+	poll_once
+	for i in $(seq 1 15); do
+		FAKE_NOW=$((1021 + (i - 1) * 11))
+		poll_once
+	done
+	[ "$(wc -l <"$notify_log")" -eq 15 ]
+}
+
+@test "load_config: MAX_ALERTS defaults to 10 and reads the config" {
+	[ "$MAX_ALERTS" = "10" ]
+	printf 'SUDO_WATCH_MAX_ALERTS=0\n' >"$SUDO_WATCH_CONFIG"
+	load_config
+	[ "$MAX_ALERTS" = "0" ]
+}
+
 @test "poll_once: tracks a pending pid but doesn't alert before the threshold" {
 	pgrep_pending_4242
 	local notify_log="$BATS_TEST_TMPDIR/notify.log"

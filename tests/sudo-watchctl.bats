@@ -360,3 +360,96 @@ SH
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Config file:"* ]]
 }
+
+# --- max-alerts ---------------------------------------------------------
+
+@test "max-alerts: defaults to 10" {
+	run main max-alerts
+	[ "$output" = "10" ]
+}
+
+@test "max-alerts: sets a number, and 'unlimited' or 0 mean unlimited" {
+	main max-alerts 3 >/dev/null
+	run main max-alerts
+	[ "$output" = "3" ]
+	main max-alerts unlimited >/dev/null
+	run main max-alerts
+	[ "$output" = "unlimited" ]
+	grep -qx 'SUDO_WATCH_MAX_ALERTS=0' "$SUDO_WATCH_CONFIG"
+	main max-alerts 0 >/dev/null
+	run main max-alerts
+	[ "$output" = "unlimited" ]
+}
+
+@test "max-alerts: rejects junk" {
+	run main max-alerts lots
+	[ "$status" -eq 1 ]
+	run main max-alerts -1
+	[ "$status" -eq 1 ]
+}
+
+# --- widget on/off ---------------------------------------------------------
+
+make_shell_json() {
+	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
+	cat > "$SHELL_CONFIG" <<'JSON'
+{"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"right":[{"id":"omarchy.tray"},{"id":"taylorburke.sudo-watch"},{"id":"widget.torrents","x":1}]}},"plugins":[{"id":"taylorburke.sudo-watch"}]}
+JSON
+}
+
+@test "widget status: reports on/off from the bar layout" {
+	make_shell_json
+	run main widget status
+	[ "$output" = "on" ]
+	run main widget
+	[ "$output" = "on" ]
+	echo '{"bar":{"layout":{"right":[]}}}' > "$SHELL_CONFIG"
+	run main widget status
+	[ "$output" = "off" ]
+}
+
+@test "widget off: removes only this widget, keeps the rest, leaves the plugin enabled, and backs up" {
+	make_shell_json
+	run main widget off
+	[ "$status" -eq 0 ]
+	run main widget status
+	[ "$output" = "off" ]
+	jq -e '.bar.layout.right | map(.id) == ["omarchy.tray","widget.torrents"]' "$SHELL_CONFIG"
+	jq -e '.bar.layout.left[0].id == "omarchy.menu"' "$SHELL_CONFIG"
+	jq -e '.plugins | map(.id) | index("taylorburke.sudo-watch")' "$SHELL_CONFIG"
+	ls "$SHELL_CONFIG".bak.sudo-watch-* >/dev/null
+}
+
+@test "widget off: is a no-op when already off" {
+	make_shell_json
+	main widget off >/dev/null
+	local n; n="$(ls "$BATS_TEST_TMPDIR"/shell.json.bak.* | wc -l)"
+	run main widget off
+	[[ "$output" == *"already off"* ]]
+	[ "$(ls "$BATS_TEST_TMPDIR"/shell.json.bak.* | wc -l)" -eq "$n" ]
+}
+
+@test "widget off: refuses to touch a shell.json that isn't valid JSON" {
+	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
+	echo 'not json taylorburke.sudo-watch' > "$SHELL_CONFIG"
+	run main widget off
+	[ "$(cat "$SHELL_CONFIG")" = "not json taylorburke.sudo-watch" ]
+}
+
+@test "widget on: asks omarchy to put it on the right of the bar" {
+	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
+	echo '{"bar":{"layout":{"right":[]}}}' > "$SHELL_CONFIG"
+	local log="$BATS_TEST_TMPDIR/omarchy.log"
+	stub omarchy <<SH
+#!/usr/bin/env bash
+echo "\$@" >> "$log"
+SH
+	run main widget on
+	[ "$status" -eq 0 ]
+	[ "$(cat "$log")" = "bar put taylorburke.sudo-watch right" ]
+}
+
+@test "widget: rejects an unknown argument" {
+	run main widget sideways
+	[ "$status" -eq 1 ]
+}

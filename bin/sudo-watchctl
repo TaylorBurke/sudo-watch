@@ -18,6 +18,9 @@ Commands:
   threshold [seconds]   Get or set seconds before the first alert
   repeat [seconds]      Get or set seconds between repeat alerts
   sound [path]          Get or set the alert sound file
+  max-alerts [n|unlimited]  Get or set how many alerts one waiting prompt may
+                        trigger before they stop (default 10; 0 = unlimited)
+  widget [on|off|status]  Show, add or remove the bar widget (watcher keeps running)
   status                Show current settings and service state
   test                  Play the current alert sound at current volume
 EOF
@@ -93,6 +96,34 @@ set_kv() {
 		fi
 		mv -f "$tmp" "$target"
 	) 8>>"${target}.lock"
+}
+
+PLUGIN_ID="taylorburke.sudo-watch"
+SHELL_CONFIG="${SUDO_WATCH_SHELL_CONFIG:-$HOME/.config/omarchy/shell.json}"
+
+# True if the widget appears in any section of the bar layout.
+widget_present() {
+	[[ -f "$SHELL_CONFIG" ]] || return 1
+	jq -e --arg id "$PLUGIN_ID" '[.bar.layout[]?[]? | select(.id == $id)] | length > 0' "$SHELL_CONFIG" >/dev/null 2>&1
+}
+
+# Drops only this widget's layout entries. Omarchy has no "remove from bar"
+# command, and `omarchy plugin disable` would also stop the watcher service,
+# which is the wrong default for an alerting tool. shell.json hot-reloads, so
+# the edit is validated JSON, backed up, and renamed into place atomically.
+widget_remove() {
+	local target tmp
+	target="$(readlink -f "$SHELL_CONFIG")"
+	cp -p -- "$target" "${target}.bak.sudo-watch-$(date +%s)"
+	tmp="$(umask 077; mktemp "${target}.XXXXXX")"
+	if ! jq --arg id "$PLUGIN_ID" '.bar.layout |= with_entries(.value |= map(select(.id != $id)))' "$target" > "$tmp" \
+		|| ! jq -e . "$tmp" >/dev/null; then
+		rm -f "$tmp"
+		echo "failed to update $SHELL_CONFIG; left unchanged" >&2
+		return 1
+	fi
+	chmod --reference="$target" -- "$tmp"
+	mv -f -- "$tmp" "$target"
 }
 
 # True if some process holds the watcher's single-instance lock.
@@ -172,6 +203,45 @@ main() {
 			echo "Alert sound set to $1"
 		fi
 		;;
+	max-alerts)
+		if [[ $# -eq 0 ]]; then
+			n="$(get_num SUDO_WATCH_MAX_ALERTS 10)"
+			if [[ "$n" == "0" ]]; then echo "unlimited"; else echo "$n"; fi
+		else
+			case "$1" in
+				unlimited|0) set_kv SUDO_WATCH_MAX_ALERTS 0; echo "Alerts are unlimited" ;;
+				*)
+					is_uint "$1" || { echo "max-alerts must be a non-negative integer or 'unlimited'" >&2; exit 1; }
+					set_kv SUDO_WATCH_MAX_ALERTS "$((10#$1))"
+					echo "Alerts stop after ${1} per waiting prompt"
+					;;
+			esac
+		fi
+		;;
+	widget)
+		case "${1:-status}" in
+			status)
+				if widget_present; then echo "on"; else echo "off"; fi
+				;;
+			on)
+				if widget_present; then
+					echo "Widget already on the bar"
+				else
+					omarchy bar put "$PLUGIN_ID" right
+					echo "Widget added to the bar"
+				fi
+				;;
+			off)
+				if widget_present; then
+					widget_remove
+					echo "Widget removed from the bar (the watcher is still running)"
+				else
+					echo "Widget already off the bar"
+				fi
+				;;
+			*) echo "widget expects 'on', 'off' or 'status'" >&2; exit 1 ;;
+		esac
+		;;
 	status)
 		echo "Config file:  $CONFIG_FILE"
 		echo "Volume:       $(get_num SUDO_WATCH_VOLUME 100)%"
@@ -182,6 +252,9 @@ main() {
 		fi
 		echo "Threshold:    $(get_num SUDO_WATCH_ALERT_THRESHOLD 20)s"
 		echo "Repeat every: $(get_num SUDO_WATCH_REPEAT_INTERVAL 10)s"
+		n="$(get_num SUDO_WATCH_MAX_ALERTS 10)"
+		echo "Max alerts:   $([[ "$n" == "0" ]] && echo unlimited || echo "$n")"
+		echo "Bar widget:   $(widget_present && echo on || echo off)"
 		echo "Sound:        $(get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND")"
 		if systemctl --user is-active --quiet sudo-watch.service 2>/dev/null; then
 			echo "Service:      active (systemd)"

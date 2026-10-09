@@ -54,6 +54,8 @@ load_config() {
 	(( POLL_INTERVAL > 0 && POLL_INTERVAL <= 3600 )) || POLL_INTERVAL=2
 	ALERT_THRESHOLD="$(cfg_num SUDO_WATCH_ALERT_THRESHOLD 20)"
 	REPEAT_INTERVAL="$(cfg_num SUDO_WATCH_REPEAT_INTERVAL 10)"
+	# Alerts per waiting prompt before they stop; 0 = unlimited.
+	MAX_ALERTS="$(cfg_num SUDO_WATCH_MAX_ALERTS 10)"
 	SOUND="${cfg[SUDO_WATCH_SOUND]-${SUDO_WATCH_SOUND:-/usr/share/sounds/freedesktop/stereo/dialog-warning.oga}}"
 	VOLUME_PERCENT="$(cfg_num SUDO_WATCH_VOLUME 100)"
 	VOLUME_ESCALATE="$(cfg_num SUDO_WATCH_VOLUME_ESCALATE 0)"
@@ -113,7 +115,8 @@ poll_once() {
 		elapsed=$(( t - first_seen["$pid"] ))
 		if (( elapsed >= ALERT_THRESHOLD )); then
 			last="${last_alert[$pid]:-0}"
-			if (( t - last >= REPEAT_INTERVAL )); then
+			if (( t - last >= REPEAT_INTERVAL )) \
+				&& (( MAX_ALERTS == 0 || ${alert_count[$pid]:-0} < MAX_ALERTS )); then
 				alert_count["$pid"]=$(( ${alert_count[$pid]:-0} + 1 ))
 				send_alert "$pid" "$cmd" "$elapsed" "${alert_count[$pid]}"
 				last_alert["$pid"]="$t"

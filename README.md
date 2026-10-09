@@ -3,7 +3,8 @@
 Background daemon that watches for `sudo`/`pkexec` processes stuck waiting
 on a password prompt. If one goes unanswered for 20 seconds, it fires a
 desktop notification and plays a sound, repeating every 10 seconds until
-you respond (or the process goes away).
+you respond, the process goes away, or the per-prompt alert limit is
+reached (10 by default, or unlimited if you prefer).
 
 ## How it works
 
@@ -12,6 +13,11 @@ Every 2 seconds it polls for `sudo`/`pkexec` processes. A process counts as
 your password, sudo execs the target command, so a child appearing means
 it's resolved. This avoids false positives for cached-credential or
 `NOPASSWD` sudo calls, since those spawn a child almost immediately.
+
+Alerts are counted per waiting prompt. After `SUDO_WATCH_MAX_ALERTS` of
+them (default 10) that prompt goes quiet; a new `sudo` starts a fresh
+count. Set it to `0` or run `sudo-watchctl max-alerts unlimited` to keep
+alerting until you respond.
 
 ## Install
 
@@ -48,11 +54,29 @@ regardless of where that is), enables it, and symlinks `sudo-watchctl` into
 ## Bar widget (Omarchy plugin install)
 
 The plugin also provides a bar widget: a lock icon that dims when the
-watcher isn't running. Click it to open a popup with the alert volume,
-escalation toggle (with step and cap), first-alert and repeat timers, and a
-test-sound button. Add it from the Omarchy bar settings, or place
-`taylorburke.sudo-watch` in the `bar.layout` section of
-`~/.config/omarchy/shell.json`.
+watcher isn't running. Hover for the watcher's status; click to open a popup
+with:
+
+- alert volume, plus the escalation toggle (with step and cap)
+- first-alert and repeat timers
+- the maximum number of alerts per waiting prompt (`0` = unlimited)
+- a test-sound button
+
+Turn the widget on or off from the command line:
+
+```sh
+sudo-watchctl widget            # on / off
+sudo-watchctl widget on         # add it to the right side of the bar
+sudo-watchctl widget off        # remove it from the bar
+```
+
+`widget off` only removes the icon. The watcher keeps running and alerting;
+it does **not** disable the plugin (which would also stop the alerts). Before
+changing `~/.config/omarchy/shell.json` it saves a backup next to it
+(`shell.json.bak.sudo-watch-<timestamp>`), and it only ever removes this
+widget's entry. `widget on` uses Omarchy's own `omarchy bar put`, so you can
+move it afterwards with `omarchy bar move taylorburke.sudo-watch --section
+center`. You can also add it from Omarchy's bar settings.
 
 The widget has no logic of its own: every control runs `sudo-watchctl` with
 an argument list (no shell), passing only bounded integers or `on`/`off`, so
@@ -72,6 +96,9 @@ sudo-watchctl volume-step 10      # +10% per repeat alert while escalating
 sudo-watchctl volume-max 150      # cap escalated volume at 150%
 sudo-watchctl threshold 20        # seconds before the first alert
 sudo-watchctl repeat 10           # seconds between repeat alerts
+sudo-watchctl max-alerts 10       # stop after this many alerts per prompt
+sudo-watchctl max-alerts unlimited  # ...or never stop (same as 0)
+sudo-watchctl widget on|off       # add/remove the bar widget (see above)
 sudo-watchctl sound /path/to.oga  # alert sound file
 sudo-watchctl test                # preview the current alert sound/volume
 ```
@@ -85,6 +112,7 @@ for one-off overrides, e.g. during testing):
 | `SUDO_WATCH_POLL_INTERVAL` | `2` | Poll frequency, in seconds |
 | `SUDO_WATCH_ALERT_THRESHOLD` | `20` | Seconds waiting before the first alert |
 | `SUDO_WATCH_REPEAT_INTERVAL` | `10` | Seconds between repeat alerts |
+| `SUDO_WATCH_MAX_ALERTS` | `10` | Alerts per waiting prompt before they stop; `0` = unlimited |
 | `SUDO_WATCH_SOUND` | `/usr/share/sounds/freedesktop/stereo/dialog-warning.oga` | Alert sound file |
 | `SUDO_WATCH_VOLUME` | `100` | Base alert volume, as a percent |
 | `SUDO_WATCH_VOLUME_ESCALATE` | `0` | `1` ramps volume up on repeat alerts, `0` keeps it flat |

@@ -26,6 +26,7 @@ BarWidget {
   property int volumeMax: 150
   property int threshold: 20
   property int repeatEvery: 10
+  property int maxAlerts: 10   // 0 = unlimited
 
   implicitWidth: glyph.implicitWidth + Style.space(14)
   implicitHeight: barSize
@@ -43,6 +44,7 @@ BarWidget {
       }
       else if ((m = line.match(/^Threshold:\s+(\d+)s/))) threshold = parseInt(m[1])
       else if ((m = line.match(/^Repeat every:\s+(\d+)s/))) repeatEvery = parseInt(m[1])
+      else if ((m = line.match(/^Max alerts:\s+(\d+|unlimited)/))) maxAlerts = m[1] === "unlimited" ? 0 : parseInt(m[1])
       else if ((m = line.match(/^Service:\s+(.*)$/))) {
         serviceText = m[1].trim()
         serviceActive = serviceText.indexOf("active") === 0
@@ -215,6 +217,16 @@ BarWidget {
         value: root.repeatEvery
         foreground: root.bar.foreground
         onModified: function(v) { root.repeatEvery = v; root.run(["repeat", String(v)]) }
+      }
+
+      NumberField {
+        width: parent.width
+        label: root.maxAlerts === 0 ? "Max alerts (0 = unlimited)" : "Max alerts per prompt"
+        from: 0
+        to: 1000
+        value: root.maxAlerts
+        foreground: root.bar.foreground
+        onModified: function(v) { root.maxAlerts = v; root.run(["max-alerts", v === 0 ? "unlimited" : String(v)]) }
       }
 
       Button {
