@@ -23,27 +23,82 @@ Commands:
 EOF
 }
 
+LOCK_FILE="${SUDO_WATCH_LOCK:-${XDG_RUNTIME_DIR:-$HOME/.cache}/sudo-watch.lock}"
+
+# Digits only, bounded: matches what the watcher accepts, so a value the CLI
+# writes is always one the watcher will honor.
+is_uint() { [[ "$1" =~ ^[0-9]{1,9}$ ]]; }
+
+# Volumes are capped well below anything pa_volume_t or a pair of ears can
+# take; the watcher clamps to the same ceiling.
+MAX_PERCENT=500
+is_percent() { is_uint "$1" && (( 10#$1 <= MAX_PERCENT )); }
+
 ensure_config() {
-	mkdir -p "$(dirname "$CONFIG_FILE")"
-	[[ -f "$CONFIG_FILE" ]] || : > "$CONFIG_FILE"
+	mkdir -p -m 700 "$(dirname "$CONFIG_FILE")"
+	[[ -f "$CONFIG_FILE" ]] || (umask 077; : > "$CONFIG_FILE")
 }
 
+# Exact-key lookup by literal prefix match (no regex built from the key).
 get_kv() {
 	local key="$1" default="$2"
 	[[ -f "$CONFIG_FILE" ]] || { echo "$default"; return; }
 	local val
-	val="$(grep -E "^${key}=" "$CONFIG_FILE" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+	val="$(awk -v k="$key" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2) } END { if (v != "") print v }' "$CONFIG_FILE" 2>/dev/null)"
+	# Same normalisation as the watcher's parser (CR, one pair of quotes), plus
+	# dropping control characters so a hand-edited value can't inject terminal
+	# escape sequences into `status`.
+	val="${val%$'\r'}"
+	if [[ "$val" =~ ^\"(.*)\"$ || "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
+	val="${val//[[:cntrl:]]/}"
 	echo "${val:-$default}"
 }
 
+# Numeric lookup: anything that isn't a plain bounded integer yields the
+# default, exactly like the watcher. Never feed get_kv output into arithmetic
+# directly -- bash evaluates variable contents (including array subscripts
+# with command substitutions) as expressions.
+get_num() {
+	local val
+	val="$(get_kv "$1" "$2")"
+	if is_uint "$val"; then echo "$((10#$val))"; else echo "$2"; fi
+}
+
+# Rewrites the config via awk with the value passed through the environment
+# (no sed/regex interpretation of it) into a private temp file, then renames
+# it into place so readers never see a half-written file. Control characters
+# (newlines especially) are rejected: a newline would smuggle in extra keys.
 set_kv() {
-	local key="$1" value="$2"
-	ensure_config
-	if grep -qE "^${key}=" "$CONFIG_FILE" 2>/dev/null; then
-		sed -i "s|^${key}=.*|${key}=${value}|" "$CONFIG_FILE"
-	else
-		echo "${key}=${value}" >> "$CONFIG_FILE"
+	local key="$1" value="$2" target tmp
+	if [[ "$value" == *[[:cntrl:]]* ]]; then
+		echo "value contains control characters" >&2
+		return 1
 	fi
+	ensure_config
+	target="$(readlink -f "$CONFIG_FILE")"
+	# Serialize concurrent writers (widget + CLI) so one can't clobber the
+	# other's update; the lock is a sidecar file since the config itself is
+	# replaced by rename.
+	(
+		flock 8
+		tmp="$(umask 077; mktemp "${target}.XXXXXX")"
+		if ! K="$key" V="$value" awk '
+			BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
+			index($0, k "=") == 1 { print k "=" v; found = 1; next }
+			{ print }
+			END { if (!found) print k "=" v }
+		' "$target" > "$tmp"; then
+			rm -f "$tmp"
+			exit 1
+		fi
+		mv -f "$tmp" "$target"
+	) 8>>"${target}.lock"
+}
+
+# True if some process holds the watcher's single-instance lock.
+watcher_running() {
+	[[ -e "$LOCK_FILE" ]] || return 1
+	! ( exec 9<"$LOCK_FILE" && flock -n 9 ) 2>/dev/null
 }
 
 main() {
@@ -53,16 +108,16 @@ main() {
 	case "$cmd" in
 	volume)
 		if [[ $# -eq 0 ]]; then
-			get_kv SUDO_WATCH_VOLUME 100
+			get_num SUDO_WATCH_VOLUME 100
 		else
-			[[ "$1" =~ ^[0-9]+$ ]] || { echo "volume must be a non-negative integer percent" >&2; exit 1; }
+			is_percent "$1" || { echo "volume must be a non-negative integer percent (at most $MAX_PERCENT)" >&2; exit 1; }
 			set_kv SUDO_WATCH_VOLUME "$1"
 			echo "Alert volume set to ${1}%"
 		fi
 		;;
 	escalate)
 		if [[ $# -eq 0 ]]; then
-			[[ "$(get_kv SUDO_WATCH_VOLUME_ESCALATE 0)" == "1" ]] && echo "on" || echo "off"
+			[[ "$(get_num SUDO_WATCH_VOLUME_ESCALATE 0)" == "1" ]] && echo "on" || echo "off"
 		else
 			case "$1" in
 				on) set_kv SUDO_WATCH_VOLUME_ESCALATE 1; echo "Volume escalation on" ;;
@@ -73,36 +128,36 @@ main() {
 		;;
 	volume-step)
 		if [[ $# -eq 0 ]]; then
-			get_kv SUDO_WATCH_VOLUME_STEP 10
+			get_num SUDO_WATCH_VOLUME_STEP 10
 		else
-			[[ "$1" =~ ^[0-9]+$ ]] || { echo "volume-step must be a non-negative integer percent" >&2; exit 1; }
+			is_percent "$1" || { echo "volume-step must be a non-negative integer percent (at most $MAX_PERCENT)" >&2; exit 1; }
 			set_kv SUDO_WATCH_VOLUME_STEP "$1"
 			echo "Volume step set to ${1}%"
 		fi
 		;;
 	volume-max)
 		if [[ $# -eq 0 ]]; then
-			get_kv SUDO_WATCH_VOLUME_MAX 150
+			get_num SUDO_WATCH_VOLUME_MAX 150
 		else
-			[[ "$1" =~ ^[0-9]+$ ]] || { echo "volume-max must be a non-negative integer percent" >&2; exit 1; }
+			is_percent "$1" || { echo "volume-max must be a non-negative integer percent (at most $MAX_PERCENT)" >&2; exit 1; }
 			set_kv SUDO_WATCH_VOLUME_MAX "$1"
 			echo "Volume cap set to ${1}%"
 		fi
 		;;
 	threshold)
 		if [[ $# -eq 0 ]]; then
-			get_kv SUDO_WATCH_ALERT_THRESHOLD 20
+			get_num SUDO_WATCH_ALERT_THRESHOLD 20
 		else
-			[[ "$1" =~ ^[0-9]+$ ]] || { echo "threshold must be a non-negative integer (seconds)" >&2; exit 1; }
+			is_uint "$1" || { echo "threshold must be a non-negative integer (seconds)" >&2; exit 1; }
 			set_kv SUDO_WATCH_ALERT_THRESHOLD "$1"
 			echo "Alert threshold set to ${1}s"
 		fi
 		;;
 	repeat)
 		if [[ $# -eq 0 ]]; then
-			get_kv SUDO_WATCH_REPEAT_INTERVAL 10
+			get_num SUDO_WATCH_REPEAT_INTERVAL 10
 		else
-			[[ "$1" =~ ^[0-9]+$ ]] || { echo "repeat interval must be a non-negative integer (seconds)" >&2; exit 1; }
+			is_uint "$1" || { echo "repeat interval must be a non-negative integer (seconds)" >&2; exit 1; }
 			set_kv SUDO_WATCH_REPEAT_INTERVAL "$1"
 			echo "Repeat interval set to ${1}s"
 		fi
@@ -111,34 +166,35 @@ main() {
 		if [[ $# -eq 0 ]]; then
 			get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND"
 		else
-			[[ -f "$1" ]] || { echo "no such file: $1" >&2; exit 1; }
+			[[ -f "$1" && -r "$1" ]] || { echo "no such file: $1" >&2; exit 1; }
+			[[ "$1" == *[[:cntrl:]]* ]] && { echo "sound path contains control characters" >&2; exit 1; }
 			set_kv SUDO_WATCH_SOUND "$1"
 			echo "Alert sound set to $1"
 		fi
 		;;
 	status)
 		echo "Config file:  $CONFIG_FILE"
-		echo "Volume:       $(get_kv SUDO_WATCH_VOLUME 100)%"
-		if [[ "$(get_kv SUDO_WATCH_VOLUME_ESCALATE 0)" == "1" ]]; then
-			echo "Escalate:     on (+$(get_kv SUDO_WATCH_VOLUME_STEP 10)% per repeat, cap $(get_kv SUDO_WATCH_VOLUME_MAX 150)%)"
+		echo "Volume:       $(get_num SUDO_WATCH_VOLUME 100)%"
+		if [[ "$(get_num SUDO_WATCH_VOLUME_ESCALATE 0)" == "1" ]]; then
+			echo "Escalate:     on (+$(get_num SUDO_WATCH_VOLUME_STEP 10)% per repeat, cap $(get_num SUDO_WATCH_VOLUME_MAX 150)%)"
 		else
 			echo "Escalate:     off"
 		fi
-		echo "Threshold:    $(get_kv SUDO_WATCH_ALERT_THRESHOLD 20)s"
-		echo "Repeat every: $(get_kv SUDO_WATCH_REPEAT_INTERVAL 10)s"
+		echo "Threshold:    $(get_num SUDO_WATCH_ALERT_THRESHOLD 20)s"
+		echo "Repeat every: $(get_num SUDO_WATCH_REPEAT_INTERVAL 10)s"
 		echo "Sound:        $(get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND")"
 		if systemctl --user is-active --quiet sudo-watch.service 2>/dev/null; then
 			echo "Service:      active (systemd)"
-		elif pgrep -f 'bin/sudo-watch\.sh' >/dev/null 2>&1; then
+		elif watcher_running; then
 			echo "Service:      active (plugin)"
 		else
 			echo "Service:      not active"
 		fi
 		;;
 	test)
-		vol="$(get_kv SUDO_WATCH_VOLUME 100)"
+		vol="$(get_num SUDO_WATCH_VOLUME 100)"
 		snd="$(get_kv SUDO_WATCH_SOUND "$DEFAULT_SOUND")"
-		paplay --volume="$(( vol * 65536 / 100 ))" "$snd"
+		paplay --volume="$(( (vol > MAX_PERCENT ? MAX_PERCENT : vol) * 65536 / 100 ))" -- "$snd"
 		;;
 	-h|--help|help)
 		usage

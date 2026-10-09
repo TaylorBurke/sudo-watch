@@ -11,6 +11,7 @@ SUDO_WATCHCTL="${BATS_TEST_DIRNAME}/../bin/sudo-watchctl"
 setup() {
 	load_stub_dir
 	export SUDO_WATCH_CONFIG="$BATS_TEST_TMPDIR/config"
+	export SUDO_WATCH_LOCK="$BATS_TEST_TMPDIR/lock"
 	stub systemctl <<'SH'
 #!/usr/bin/env bash
 exit 1

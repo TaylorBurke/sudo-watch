@@ -11,6 +11,7 @@ SUDO_WATCHCTL="${BATS_TEST_DIRNAME}/../bin/sudo-watchctl"
 setup() {
 	load_stub_dir
 	export SUDO_WATCH_CONFIG="$BATS_TEST_TMPDIR/config"
+	export SUDO_WATCH_LOCK="$BATS_TEST_TMPDIR/lock"
 	source "$SUDO_WATCHCTL"
 }
 
@@ -176,7 +177,22 @@ SH
 	[[ "$squeezed" == *"Service: active (systemd)"* ]]
 }
 
-@test "status: falls back to detecting the plugin process" {
+@test "status: detects the plugin watcher by its held lock" {
+	stub systemctl <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+	flock "$SUDO_WATCH_LOCK" sleep 5 &
+	local holder=$!
+	sleep 0.3
+	run main status
+	kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null || true
+	local squeezed
+	squeezed="$(squeeze "$output")"
+	[[ "$squeezed" == *"Service: active (plugin)"* ]]
+}
+
+@test "status: an unrelated process mentioning the script name is not a watcher" {
 	stub systemctl <<'SH'
 #!/usr/bin/env bash
 exit 1
@@ -186,9 +202,104 @@ SH
 exit 0
 SH
 	run main status
-	local squeezed
-	squeezed="$(squeeze "$output")"
-	[[ "$squeezed" == *"Service: active (plugin)"* ]]
+	[[ "$(squeeze "$output")" == *"Service: not active"* ]]
+}
+
+# --- security regressions -------------------------------------------------
+
+@test "sound: a path with sed/regex metacharacters is stored literally" {
+	local f="$BATS_TEST_TMPDIR/we|ird&name\\1.oga"
+	: > "$f"
+	run main sound "$f"
+	[ "$status" -eq 0 ]
+	run main sound
+	[ "$output" = "$f" ]
+}
+
+@test "sound: rejects a path containing a newline" {
+	local f="$BATS_TEST_TMPDIR/a"$'\n'"SUDO_WATCH_VOLUME=999"
+	: > "$f"
+	run main sound "$f"
+	[ "$status" -ne 0 ]
+	[ ! -f "$SUDO_WATCH_CONFIG" ] || ! grep -q '^SUDO_WATCH_VOLUME=999' "$SUDO_WATCH_CONFIG"
+}
+
+@test "test: a malicious volume in the config is never evaluated as arithmetic" {
+	local marker="$BATS_TEST_TMPDIR/pwned"
+	echo "SUDO_WATCH_VOLUME=BASH_VERSINFO[\$(touch $marker)]" > "$SUDO_WATCH_CONFIG"
+	stub paplay <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+	run main test
+	[ ! -e "$marker" ]
+	run main volume
+	[ "$output" = "100" ]
+}
+
+@test "volume: values above the ceiling are rejected" {
+	run main volume 501
+	[ "$status" -eq 1 ]
+	run main volume-max 9999
+	[ "$status" -eq 1 ]
+	run main volume 500
+	[ "$status" -eq 0 ]
+}
+
+@test "test: clamps an out-of-range configured volume" {
+	local log="$BATS_TEST_TMPDIR/paplay.log"
+	stub paplay <<SH
+#!/usr/bin/env bash
+echo "\$@" >> "$log"
+SH
+	echo "SUDO_WATCH_VOLUME=999999999" > "$SUDO_WATCH_CONFIG"
+	run main test
+	[[ "$(cat "$log")" == "--volume=327680"* ]]
+}
+
+@test "get_kv: strips quotes/CR like the watcher and drops control characters" {
+	printf 'SUDO_WATCH_VOLUME="50"\r\nSUDO_WATCH_SOUND=a\033[31mb\n' > "$SUDO_WATCH_CONFIG"
+	run main volume
+	[ "$output" = "50" ]
+	run main sound
+	[ "$output" = "a[31mb" ]
+}
+
+@test "set_kv: concurrent writers don't lose updates" {
+	for i in 1 2 3 4 5 6 7 8; do
+		( main volume-step "$i" >/dev/null; main repeat "$((i + 10))" >/dev/null ) &
+	done
+	wait
+	grep -q '^SUDO_WATCH_VOLUME_STEP=' "$SUDO_WATCH_CONFIG"
+	grep -q '^SUDO_WATCH_REPEAT_INTERVAL=' "$SUDO_WATCH_CONFIG"
+	[ "$(grep -c '^SUDO_WATCH_VOLUME_STEP=' "$SUDO_WATCH_CONFIG")" -eq 1 ]
+	[ "$(grep -c '^SUDO_WATCH_REPEAT_INTERVAL=' "$SUDO_WATCH_CONFIG")" -eq 1 ]
+}
+
+@test "numeric settings: rejects absurdly long numbers" {
+	run main volume 12345678901234567890
+	[ "$status" -eq 1 ]
+}
+
+@test "set_kv: refuses control characters in a value" {
+	run set_kv SUDO_WATCH_SOUND $'x\ny'
+	[ "$status" -ne 0 ]
+}
+
+@test "config is created private (0600) in a private (0700) dir" {
+	CONFIG_FILE="$BATS_TEST_TMPDIR/newdir/config"
+	main volume 50 >/dev/null
+	[ "$(stat -c %a "$CONFIG_FILE")" = "600" ]
+	[ "$(stat -c %a "$(dirname "$CONFIG_FILE")")" = "700" ]
+}
+
+@test "set_kv: writes through a symlinked config instead of replacing it" {
+	echo "SUDO_WATCH_VOLUME=10" > "$BATS_TEST_TMPDIR/real"
+	ln -s "$BATS_TEST_TMPDIR/real" "$BATS_TEST_TMPDIR/link"
+	CONFIG_FILE="$BATS_TEST_TMPDIR/link"
+	main volume 33 >/dev/null
+	[ -L "$BATS_TEST_TMPDIR/link" ]
+	grep -qx 'SUDO_WATCH_VOLUME=33' "$BATS_TEST_TMPDIR/real"
 }
 
 @test "status: shows escalation detail when on" {

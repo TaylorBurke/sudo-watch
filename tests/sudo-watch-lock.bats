@@ -36,6 +36,51 @@ SH
 	! grep -q "already watching" "$log"
 }
 
+@test "main: opens the lock in append mode so a symlinked lock can't truncate its target" {
+	local victim="$BATS_TEST_TMPDIR/victim"
+	echo "precious" > "$victim"
+	ln -s "$victim" "$BATS_TEST_TMPDIR/lock"
+	export SUDO_WATCH_LOCK="$BATS_TEST_TMPDIR/lock"
+
+	timeout 2 bash "$SUDO_WATCH_SCRIPT" >/dev/null 2>&1 &
+	local pid=$!
+	sleep 0.5
+	kill "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+
+	[ "$(cat "$victim")" = "precious" ]
+}
+
+@test "main: without XDG_RUNTIME_DIR the default lock lives under HOME, never /tmp" {
+	unset SUDO_WATCH_LOCK XDG_RUNTIME_DIR
+	export HOME="$BATS_TEST_TMPDIR/home"
+	mkdir -p "$HOME"
+
+	timeout 2 bash "$SUDO_WATCH_SCRIPT" >/dev/null 2>&1 &
+	local pid=$!
+	sleep 0.5
+	kill "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+
+	[ -e "$HOME/.cache/sudo-watch.lock" ]
+}
+
+@test "main: child processes don't inherit the lock, and the lock file is private" {
+	local lock="$BATS_TEST_TMPDIR/lock"
+	export SUDO_WATCH_LOCK="$lock"
+
+	timeout 5 bash "$SUDO_WATCH_SCRIPT" >/dev/null 2>&1 &
+	local pid=$!
+	sleep 1.2 # long enough for the loop to be inside its `sleep`
+	[ "$(stat -c %a "$lock")" = "600" ]
+	# Kill only the watcher shell; its sleep child (if it leaked fd 9) would
+	# keep the lock held.
+	kill -9 "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	run flock -n "$lock" true
+	[ "$status" -eq 0 ]
+}
+
 @test "main: waits for a held lock, then takes over once it's released" {
 	local lock="$BATS_TEST_TMPDIR/lock"
 	local log="$BATS_TEST_TMPDIR/out.log"

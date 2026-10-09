@@ -13,18 +13,52 @@ declare -gA alert_count
 
 now() { date +%s; }
 
+# Config is parsed as data, never `source`d: the file is just KEY=value
+# lines, so anything that can write it must not get code execution as the
+# user. Only the known keys below are honored; values are taken literally
+# (no expansion, no command substitution), and numeric keys that aren't plain
+# non-negative integers fall back to their defaults.
+declare -gA cfg=()
+
+parse_config() {
+	cfg=()
+	[[ -f "$CONFIG_FILE" ]] || return 0
+	local line key val
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%$'\r'}"
+		[[ "$line" =~ ^(SUDO_WATCH_[A-Z_]+)=(.*)$ ]] || continue
+		key="${BASH_REMATCH[1]}"
+		val="${BASH_REMATCH[2]}"
+		# Strip one matching pair of surrounding quotes (hand-edited configs).
+		if [[ "$val" =~ ^\"(.*)\"$ || "$val" =~ ^\'(.*)\'$ ]]; then
+			val="${BASH_REMATCH[1]}"
+		fi
+		cfg["$key"]="$val"
+	done <"$CONFIG_FILE"
+}
+
+# cfg_num KEY DEFAULT: config value, else environment, else default; must be
+# a non-negative integer or the default is used.
+cfg_num() {
+	local key="$1" default="$2" val
+	val="${cfg[$key]-${!key-}}"
+	[[ "$val" =~ ^[0-9]{1,9}$ ]] && echo "$((10#$val))" || echo "$default"
+}
+
 # Re-read config on every loop tick so `sudo-watchctl` changes (e.g. volume)
 # take effect within one POLL_INTERVAL, no service restart needed.
 load_config() {
-	[[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
-	POLL_INTERVAL="${SUDO_WATCH_POLL_INTERVAL:-2}"
-	ALERT_THRESHOLD="${SUDO_WATCH_ALERT_THRESHOLD:-20}"
-	REPEAT_INTERVAL="${SUDO_WATCH_REPEAT_INTERVAL:-10}"
-	SOUND="${SUDO_WATCH_SOUND:-/usr/share/sounds/freedesktop/stereo/dialog-warning.oga}"
-	VOLUME_PERCENT="${SUDO_WATCH_VOLUME:-100}"
-	VOLUME_ESCALATE="${SUDO_WATCH_VOLUME_ESCALATE:-0}"
-	VOLUME_STEP="${SUDO_WATCH_VOLUME_STEP:-10}"
-	VOLUME_MAX="${SUDO_WATCH_VOLUME_MAX:-150}"
+	parse_config
+	POLL_INTERVAL="$(cfg_num SUDO_WATCH_POLL_INTERVAL 2)"
+	# 1..3600s: 0 would spin, and a huge value would park the loop for years.
+	(( POLL_INTERVAL > 0 && POLL_INTERVAL <= 3600 )) || POLL_INTERVAL=2
+	ALERT_THRESHOLD="$(cfg_num SUDO_WATCH_ALERT_THRESHOLD 20)"
+	REPEAT_INTERVAL="$(cfg_num SUDO_WATCH_REPEAT_INTERVAL 10)"
+	SOUND="${cfg[SUDO_WATCH_SOUND]-${SUDO_WATCH_SOUND:-/usr/share/sounds/freedesktop/stereo/dialog-warning.oga}}"
+	VOLUME_PERCENT="$(cfg_num SUDO_WATCH_VOLUME 100)"
+	VOLUME_ESCALATE="$(cfg_num SUDO_WATCH_VOLUME_ESCALATE 0)"
+	VOLUME_STEP="$(cfg_num SUDO_WATCH_VOLUME_STEP 10)"
+	VOLUME_MAX="$(cfg_num SUDO_WATCH_VOLUME_MAX 150)"
 }
 
 is_pending() {
@@ -41,10 +75,17 @@ send_alert() {
 		vol=$(( VOLUME_PERCENT + VOLUME_STEP * (count - 1) ))
 		(( vol > VOLUME_MAX )) && vol="$VOLUME_MAX"
 	fi
-	notify-send -u critical -a "sudo-watch" \
+	# Hard ceiling regardless of config: paplay's volume is a 32-bit value.
+	(( vol > 500 )) && vol=500
+	# cmd is the watched process's own argv, i.e. attacker-influenced text:
+	# escape markup (notification daemons render it) and end option parsing
+	# with `--` so an argv0 like "--hint=..." can't be read as a flag.
+	# (`\&` because bash >= 5.2 treats a bare & in a replacement as the match.)
+	cmd="${cmd//&/\&amp;}"; cmd="${cmd//</\&lt;}"; cmd="${cmd//>/\&gt;}"
+	notify-send -u critical -a "sudo-watch" -- \
 		"Waiting on your password" \
 		"${cmd} (pid ${pid}) has been waiting ${elapsed}s" 2>/dev/null
-	[[ -f "$SOUND" ]] && paplay --volume="$(( vol * 65536 / 100 ))" "$SOUND" 2>/dev/null &
+	[[ -f "$SOUND" ]] && paplay --volume="$(( vol * 65536 / 100 ))" -- "$SOUND" 2>/dev/null 9>&- &
 }
 
 # One iteration of the poll loop, split out from main() so it can be
@@ -99,8 +140,16 @@ main() {
 	# the instance currently holding it stops, this one takes over rather than
 	# needing a manual restart, and Restart=on-failure / the Quickshell plugin's
 	# onExited handler never see a "failure" to loop on.
-	local lock_file="${SUDO_WATCH_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/sudo-watch.lock}"
-	exec 9>"$lock_file"
+	# Never fall back to a shared dir like /tmp: a predictable name there lets
+	# another user pre-create or symlink it. Open in append mode so a symlink
+	# can't be used to truncate some other file.
+	local lock_file="${SUDO_WATCH_LOCK:-${XDG_RUNTIME_DIR:-$HOME/.cache}/sudo-watch.lock}"
+	mkdir -p "$(dirname "$lock_file")"
+	# Created 0600 so no other process can open it just to hold the flock.
+	local old_umask
+	old_umask="$(umask)"; umask 077
+	exec 9>>"$lock_file"
+	umask "$old_umask"
 	if ! flock -n 9; then
 		echo "sudo-watch: another instance is already watching (lock: $lock_file); waiting to take over" >&2
 		flock 9
@@ -110,7 +159,9 @@ main() {
 	while true; do
 		load_config
 		poll_once
-		sleep "$POLL_INTERVAL"
+		# 9>&-: don't leak the lock fd into the child, or an orphaned sleep
+		# would keep the single-instance lock held after the watcher dies.
+		sleep "$POLL_INTERVAL" 9>&-
 	done
 }
 

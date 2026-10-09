@@ -79,6 +79,73 @@ EOF
 	[ "$ALERT_THRESHOLD" = "5" ]
 }
 
+@test "load_config: never executes the config file" {
+	local marker="$BATS_TEST_TMPDIR/pwned"
+	{
+		echo "SUDO_WATCH_VOLUME=\$(touch $marker)"
+		echo "\$(touch $marker)"
+		echo "touch $marker"
+		echo "SUDO_WATCH_ALERT_THRESHOLD=7; touch $marker"
+		echo "SUDO_WATCH_REPEAT_INTERVAL=\`touch $marker\`"
+	} >"$SUDO_WATCH_CONFIG"
+	load_config
+	[ ! -e "$marker" ]
+	[ "$VOLUME_PERCENT" = "100" ]
+	[ "$ALERT_THRESHOLD" = "20" ]
+	[ "$REPEAT_INTERVAL" = "10" ]
+}
+
+@test "load_config: ignores keys outside the SUDO_WATCH_ namespace" {
+	printf 'PATH=/nonexistent\nSUDO_WATCH_VOLUME=60\n' >"$SUDO_WATCH_CONFIG"
+	local before="$PATH"
+	load_config
+	[ "$PATH" = "$before" ]
+	[ "$VOLUME_PERCENT" = "60" ]
+}
+
+@test "load_config: non-numeric or oversized numbers fall back to defaults" {
+	printf 'SUDO_WATCH_VOLUME=loud\nSUDO_WATCH_VOLUME_MAX=99999999999999999999\nSUDO_WATCH_POLL_INTERVAL=0\n' >"$SUDO_WATCH_CONFIG"
+	load_config
+	[ "$VOLUME_PERCENT" = "100" ]
+	[ "$VOLUME_MAX" = "150" ]
+	[ "$POLL_INTERVAL" = "2" ]
+}
+
+@test "load_config: strips surrounding quotes and CRLF endings" {
+	printf 'SUDO_WATCH_VOLUME="70"\r\nSUDO_WATCH_SOUND='"'"'/x y.oga'"'"'\r\n' >"$SUDO_WATCH_CONFIG"
+	load_config
+	[ "$VOLUME_PERCENT" = "70" ]
+	[ "$SOUND" = "/x y.oga" ]
+}
+
+@test "load_config: rejects a poll interval beyond one hour" {
+	printf 'SUDO_WATCH_POLL_INTERVAL=999999999\n' >"$SUDO_WATCH_CONFIG"
+	load_config
+	[ "$POLL_INTERVAL" = "2" ]
+}
+
+@test "send_alert: clamps volume to a hard ceiling regardless of config" {
+	local log="$BATS_TEST_TMPDIR/paplay.log"
+	stub notify-send <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+	stub paplay <<SH
+#!/usr/bin/env bash
+echo "\$@" >> "$log"
+SH
+	SOUND="$BATS_TEST_TMPDIR/s.oga"; : > "$SOUND"
+	VOLUME_PERCENT=999999999; VOLUME_ESCALATE=0
+	send_alert 99 sudo 5 1
+	sleep 0.3
+	[[ "$(cat "$log")" == "--volume=327680"* ]]
+}
+
+@test "load_config: environment applies when the config lacks the key" {
+	SUDO_WATCH_VOLUME=42 load_config
+	[ "$VOLUME_PERCENT" = "42" ]
+}
+
 # --- send_alert ------------------------------------------------------------
 
 @test "send_alert: uses base volume when escalation is off" {
@@ -177,6 +244,37 @@ exit 1
 SH
 	poll_once
 	[ -z "${first_seen[4242]:-}" ]
+}
+
+@test "send_alert: ends option parsing and escapes markup in the process command" {
+	local log="$BATS_TEST_TMPDIR/notify.log"
+	stub notify-send <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$log"
+SH
+	SOUND=/nonexistent
+	send_alert 99 'sudo <b>x</b> & --hint=string:x:y' 5 1
+	grep -qx -- '--' "$log"
+	grep -q 'sudo &lt;b&gt;x&lt;/b&gt; &amp; --hint=string:x:y' "$log"
+	! grep -q '<b>' "$log"
+}
+
+@test "send_alert: passes the sound path after -- so a leading dash isn't an option" {
+	local log="$BATS_TEST_TMPDIR/paplay.log"
+	stub notify-send <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+	stub paplay <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$log"
+SH
+	cd "$BATS_TEST_TMPDIR"
+	: > ./-evil.oga
+	SOUND="./-evil.oga"
+	send_alert 99 sudo 5 1
+	sleep 0.3
+	[ "$(sed -n 2p "$log")" = "--" ]
 }
 
 @test "poll_once: tracks a pending pid but doesn't alert before the threshold" {

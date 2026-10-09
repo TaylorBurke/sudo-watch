@@ -8,7 +8,7 @@ import Quickshell.Io
 Item {
   id: root
 
-  readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "")
+  readonly property string pluginDir: decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, ""))
   readonly property string scriptPath: pluginDir + "bin/sudo-watch.sh"
 
   Process {
