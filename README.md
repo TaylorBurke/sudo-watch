@@ -45,6 +45,19 @@ This templates the systemd unit with the path you cloned into (so it works
 regardless of where that is), enables it, and symlinks `sudo-watchctl` into
 `~/.local/bin`.
 
+## Bar widget (Omarchy plugin install)
+
+The plugin also provides a bar widget: a lock icon that dims when the
+watcher isn't running. Click it to open a popup with the alert volume,
+escalation toggle (with step and cap), first-alert and repeat timers, and a
+test-sound button. Add it from the Omarchy bar settings, or place
+`taylorburke.sudo-watch` in the `bar.layout` section of
+`~/.config/omarchy/shell.json`.
+
+The widget has no logic of its own: every control runs `sudo-watchctl` with
+an argument list (no shell), passing only bounded integers or `on`/`off`, so
+the CLI remains the single place that validates and writes the config.
+
 ## Configure
 
 Use `sudo-watchctl` (symlinked to `~/.local/bin`) to change settings without
@@ -78,7 +91,7 @@ for one-off overrides, e.g. during testing):
 | `SUDO_WATCH_VOLUME_STEP` | `10` | Percent added per repeat alert while escalating |
 | `SUDO_WATCH_VOLUME_MAX` | `150` | Volume cap while escalating |
 | `SUDO_WATCH_CONFIG` | `~/.config/sudo-watch/config` | Path to the config file itself |
-| `SUDO_WATCH_LOCK` | `$XDG_RUNTIME_DIR/sudo-watch.lock` (falls back to `/tmp` if unset) | Path to the single-instance lock file |
+| `SUDO_WATCH_LOCK` | `$XDG_RUNTIME_DIR/sudo-watch.lock` (falls back to `~/.cache` if unset) | Path to the single-instance lock file |
 
 Volume here is a linear percentage passed straight to `paplay --volume`
 (software gain), not perceived loudness, which is logarithmic — going from
