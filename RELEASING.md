@@ -61,6 +61,23 @@ describe the optional standalone systemd install. `submit --offline` skips the
 check that the commit is the default-branch HEAD; that one only passes after
 the merge.
 
+`inspect` notes that are expected and deliberately left (static heuristics, not
+defects; mention them in the verification issue if a reviewer asks):
+
+- **process with no deadline** (`Service.qml`): the watcher is a supervised
+  daemon meant to run for the plugin's life; `onExited` restarts it.
+- **collector with no cap** (`BarWidget.qml`, `status`): the heuristic only
+  accepts a cap written into the process argv (like `| head -c`). The CLI
+  prints about ten short lines, output is parsed line by line, long lines are
+  ignored, and the process has a 5 s deadline.
+- **secret-shaped argv** (`sudo-watch.sh`): the `sed` that *masks* secrets in
+  notifications, and the notification call itself, whose text is masked and
+  capped by `display_cmd`.
+- **writes outside a controlled directory** (`install.sh`,
+  `bin/sudo-watchctl`): the standalone installer's documented targets, and the
+  config/`shell.json` writes (validated, backed up, atomic).
+- **long functions**: `sudo-watchctl`'s `main` is a flat `case` dispatcher.
+
 Also: `bats tests/` passes locally, and the PR's CI is green.
 
 ### 2. Merge
