@@ -6,6 +6,9 @@ Type=simple
 ExecStart=__SUDO_WATCH_DIR__/bin/sudo-watch.sh
 Restart=on-failure
 RestartSec=5
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
 
 [Install]
 WantedBy=default.target
