@@ -246,6 +246,38 @@ SH
 	[ -z "${first_seen[4242]:-}" ]
 }
 
+@test "display_cmd: masks secret-shaped values" {
+	[ "$(display_cmd 'sudo mysql -pHUNTER2 -u root')" = 'sudo mysql -p<redacted> -u root' ]
+	[ "$(display_cmd 'sudo foo --password=hunter2 --x')" = 'sudo foo --password=<redacted> --x' ]
+	[ "$(display_cmd 'sudo foo --token abc123 run')" = 'sudo foo --token <redacted> run' ]
+	[ "$(display_cmd 'sudo env API_KEY=xyz TOKEN=abc cmd')" = 'sudo env API_KEY=<redacted> TOKEN=<redacted> cmd' ]
+	[ "$(display_cmd 'sudo env db_password=pw cmd')" = 'sudo env db_password=<redacted> cmd' ]
+}
+
+@test "display_cmd: leaves ordinary commands alone, including sudo -p with a separate prompt" {
+	[ "$(display_cmd 'sudo apt upgrade')" = 'sudo apt upgrade' ]
+	[ "$(display_cmd 'sudo -p prompt: ls')" = 'sudo -p prompt: ls' ]
+}
+
+@test "display_cmd: caps long command lines" {
+	local long; long="sudo $(printf 'a%.0s' $(seq 1 200))"
+	local out; out="$(display_cmd "$long")"
+	[ "${#out}" -le 63 ]
+	[[ "$out" == *"..." ]]
+}
+
+@test "send_alert: the notification never contains a secret from the command" {
+	local log="$BATS_TEST_TMPDIR/notify.log"
+	stub notify-send <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$log"
+SH
+	SOUND=/nonexistent
+	send_alert 99 'sudo mysql -pHUNTER2 --password=hunter3' 5 1
+	! grep -q -e HUNTER2 -e hunter3 "$log"
+	grep -q '<redacted>' "$log" || grep -q '&lt;redacted&gt;' "$log"
+}
+
 @test "send_alert: ends option parsing and escapes markup in the process command" {
 	local log="$BATS_TEST_TMPDIR/notify.log"
 	stub notify-send <<SH

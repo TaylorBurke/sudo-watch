@@ -70,6 +70,21 @@ is_pending() {
 	[[ -z "$(pgrep -P "$pid")" ]]
 }
 
+# What the notification shows of the waiting command. The full argv can carry
+# secrets (`sudo mysql -pSECRET`, `--password=...`) and notifications persist
+# in history, so mask secret-shaped values and cap the length. The pid in the
+# notification is enough to identify the process.
+display_cmd() {
+	local cmd="$1"
+	cmd="$(sed -E '
+		s/((pass(word|wd)?|token|secret|api[_-]?key)=)[^ ]+/\1<redacted>/Ig
+		s/(--?(password|passwd|token|secret|api[_-]?key)[= ])[^ ]+/\1<redacted>/Ig
+		s/( -p)[^ ]+/\1<redacted>/g
+	' <<<"$cmd")"
+	(( ${#cmd} > 60 )) && cmd="${cmd:0:60}..."
+	printf '%s' "$cmd"
+}
+
 send_alert() {
 	local pid="$1" cmd="$2" elapsed="$3" count="$4"
 	local vol="$VOLUME_PERCENT"
@@ -79,6 +94,7 @@ send_alert() {
 	fi
 	# Hard ceiling regardless of config: paplay's volume is a 32-bit value.
 	(( vol > 500 )) && vol=500
+	cmd="$(display_cmd "$cmd")"
 	# cmd is the watched process's own argv, i.e. attacker-influenced text:
 	# escape markup (notification daemons render it) and end option parsing
 	# with `--` so an argv0 like "--hint=..." can't be read as a flag.

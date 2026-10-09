@@ -31,24 +31,24 @@ BarWidget {
   implicitWidth: glyph.implicitWidth + Style.space(14)
   implicitHeight: barSize
 
-  function parseStatus(text) {
+  // Parses one line of `sudo-watchctl status`. Fed line by line from a
+  // SplitParser, so nothing buffers the whole output, and absurdly long lines
+  // (which the CLI never prints) are ignored.
+  function parseLine(line) {
+    if (line.length > 300) return
     var m
-    var lines = text.split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i]
-      if ((m = line.match(/^Volume:\s+(\d+)%/))) volume = parseInt(m[1])
-      else if ((m = line.match(/^Escalate:\s+(on|off)/))) {
-        escalate = m[1] === "on"
-        var s = line.match(/\+(\d+)% per repeat, cap (\d+)%/)
-        if (s) { volumeStep = parseInt(s[1]); volumeMax = parseInt(s[2]) }
-      }
-      else if ((m = line.match(/^Threshold:\s+(\d+)s/))) threshold = parseInt(m[1])
-      else if ((m = line.match(/^Repeat every:\s+(\d+)s/))) repeatEvery = parseInt(m[1])
-      else if ((m = line.match(/^Max alerts:\s+(\d+|unlimited)/))) maxAlerts = m[1] === "unlimited" ? 0 : parseInt(m[1])
-      else if ((m = line.match(/^Service:\s+(.*)$/))) {
-        serviceText = m[1].trim()
-        serviceActive = serviceText.indexOf("active") === 0
-      }
+    if ((m = line.match(/^Volume:\s+(\d+)%/))) volume = parseInt(m[1])
+    else if ((m = line.match(/^Escalate:\s+(on|off)/))) {
+      escalate = m[1] === "on"
+      var s = line.match(/\+(\d+)% per repeat, cap (\d+)%/)
+      if (s) { volumeStep = parseInt(s[1]); volumeMax = parseInt(s[2]) }
+    }
+    else if ((m = line.match(/^Threshold:\s+(\d+)s/))) threshold = parseInt(m[1])
+    else if ((m = line.match(/^Repeat every:\s+(\d+)s/))) repeatEvery = parseInt(m[1])
+    else if ((m = line.match(/^Max alerts:\s+(\d+|unlimited)/))) maxAlerts = m[1] === "unlimited" ? 0 : parseInt(m[1])
+    else if ((m = line.match(/^Service:\s+(.*)$/))) {
+      serviceText = m[1].trim()
+      serviceActive = serviceText.indexOf("active") === 0
     }
   }
 
@@ -69,7 +69,21 @@ BarWidget {
   Process {
     id: statusProc
     command: [root.ctl, "status"]
-    stdout: StdioCollector { onStreamFinished: root.parseStatus(text) }
+    stdout: SplitParser { onRead: function(line) { root.parseLine(line) } }
+  }
+
+  // Deadlines: `status` and the setters are quick CLI calls. If one hangs
+  // (stuck lock, dead filesystem), kill it instead of leaving it running --
+  // a hung actionProc would otherwise wedge the whole queue.
+  Timer {
+    interval: 5000
+    running: statusProc.running
+    onTriggered: statusProc.running = false
+  }
+  Timer {
+    interval: 10000
+    running: actionProc.running
+    onTriggered: actionProc.running = false
   }
 
   Process {

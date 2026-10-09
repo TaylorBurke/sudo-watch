@@ -14,6 +14,11 @@ your password, sudo execs the target command, so a child appearing means
 it's resolved. This avoids false positives for cached-credential or
 `NOPASSWD` sudo calls, since those spawn a child almost immediately.
 
+The notification names the waiting command, with secret-shaped values
+(`-pSECRET`, `--password=…`, `TOKEN=…`) masked and the text capped at 60
+characters, since notifications persist in history. The pid identifies the
+process.
+
 Alerts are counted per waiting prompt. After `SUDO_WATCH_MAX_ALERTS` of
 them (default 10) that prompt goes quiet; a new `sudo` starts a fresh
 count. Set it to `0` or run `sudo-watchctl max-alerts unlimited` to keep

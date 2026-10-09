@@ -11,6 +11,9 @@ Item {
   readonly property string pluginDir: decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, ""))
   readonly property string scriptPath: pluginDir + "bin/sudo-watch.sh"
 
+  // Deliberately no deadline: the watcher is a daemon that is meant to run for
+  // the life of the plugin. It is supervised instead: if it exits, onExited
+  // restarts it after a delay.
   Process {
     id: watcher
     command: [root.scriptPath]
