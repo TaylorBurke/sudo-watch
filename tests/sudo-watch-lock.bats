@@ -69,12 +69,13 @@ SH
 	local lock="$BATS_TEST_TMPDIR/lock"
 	export SUDO_WATCH_LOCK="$lock"
 
-	timeout 5 bash "$SUDO_WATCH_SCRIPT" >/dev/null 2>&1 &
+	# 3>&-: don't hand bats' own fd to the watcher, or an old bats waits on it.
+	bash "$SUDO_WATCH_SCRIPT" >/dev/null 2>&1 3>&- &
 	local pid=$!
-	sleep 1.2 # long enough for the loop to be inside its `sleep`
+	sleep 0.5 # let it take the lock and enter its `sleep`
 	[ "$(stat -c %a "$lock")" = "600" ]
-	# Kill only the watcher shell; its sleep child (if it leaked fd 9) would
-	# keep the lock held.
+	# SIGKILL the watcher itself so it can't clean up; its `sleep` child (if
+	# it leaked fd 9) would keep the lock held.
 	kill -9 "$pid" 2>/dev/null || true
 	wait "$pid" 2>/dev/null || true
 	run flock -n "$lock" true
