@@ -74,9 +74,13 @@ sudo-watchctl widget off        # remove it from the bar
 it does **not** disable the plugin (which would also stop the alerts). Before
 changing `~/.config/omarchy/shell.json` it saves a backup next to it
 (`shell.json.bak.sudo-watch-<timestamp>`), and it only ever removes this
-widget's entry. `widget on` uses Omarchy's own `omarchy bar put`, so you can
+widget's entry, and remembers where the icon was (in
+`~/.config/sudo-watch/widget-position.json`) so `widget on` puts it back in
+the same spot, falling back to the end of the right side if that spot is
+gone. (It edits the layout itself rather than calling `omarchy bar put`,
+which does nothing for a plugin that is also listed under `plugins`.) You can
 move it afterwards with `omarchy bar move taylorburke.sudo-watch --section
-center`. You can also add it from Omarchy's bar settings.
+center`, or add it from Omarchy's bar settings.
 
 The widget has no logic of its own: every control runs `sudo-watchctl` with
 an argument list (no shell), passing only bounded integers or `on`/`off`, so

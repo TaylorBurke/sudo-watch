@@ -392,6 +392,7 @@ SH
 
 make_shell_json() {
 	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
+	WIDGET_STATE="$BATS_TEST_TMPDIR/pos.json"
 	cat > "$SHELL_CONFIG" <<'JSON'
 {"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"right":[{"id":"omarchy.tray"},{"id":"taylorburke.sudo-watch"},{"id":"widget.torrents","x":1}]}},"plugins":[{"id":"taylorburke.sudo-watch"}]}
 JSON
@@ -436,17 +437,58 @@ JSON
 	[ "$(cat "$SHELL_CONFIG")" = "not json taylorburke.sudo-watch" ]
 }
 
-@test "widget on: asks omarchy to put it on the right of the bar" {
+@test "widget on: adds it to the right section when it has no saved spot" {
 	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
-	echo '{"bar":{"layout":{"right":[]}}}' > "$SHELL_CONFIG"
-	local log="$BATS_TEST_TMPDIR/omarchy.log"
-	stub omarchy <<SH
-#!/usr/bin/env bash
-echo "\$@" >> "$log"
-SH
+	WIDGET_STATE="$BATS_TEST_TMPDIR/pos.json"
+	echo '{"bar":{"layout":{"right":[{"id":"a"},{"id":"b"}]}},"plugins":[{"id":"taylorburke.sudo-watch"}]}' > "$SHELL_CONFIG"
 	run main widget on
 	[ "$status" -eq 0 ]
-	[ "$(cat "$log")" = "bar put taylorburke.sudo-watch right" ]
+	jq -e '.bar.layout.right | map(.id) == ["a","b","taylorburke.sudo-watch"]' "$SHELL_CONFIG"
+	run main widget status
+	[ "$output" = "on" ]
+}
+
+@test "widget on: works even though the plugin is listed under plugins (omarchy bar put does not)" {
+	make_shell_json
+	WIDGET_STATE="$BATS_TEST_TMPDIR/pos.json"
+	main widget off >/dev/null
+	run main widget on
+	[ "$status" -eq 0 ]
+	run main widget status
+	[ "$output" = "on" ]
+}
+
+@test "widget off then on: restores the same position, section and settings" {
+	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
+	WIDGET_STATE="$BATS_TEST_TMPDIR/pos.json"
+	echo '{"bar":{"layout":{"left":[{"id":"m"}],"center":[{"id":"c"},{"id":"taylorburke.sudo-watch","barText":"none"},{"id":"d"}],"right":[{"id":"r"}]}}}' > "$SHELL_CONFIG"
+	main widget off >/dev/null
+	jq -e '.bar.layout.center | map(.id) == ["c","d"]' "$SHELL_CONFIG"
+	main widget on >/dev/null
+	jq -e '.bar.layout.center | map(.id) == ["c","taylorburke.sudo-watch","d"]' "$SHELL_CONFIG"
+	jq -e '.bar.layout.center[1].barText == "none"' "$SHELL_CONFIG"
+	jq -e '.bar.layout.right | map(.id) == ["r"]' "$SHELL_CONFIG"
+}
+
+@test "widget on: falls back to the end of the section if its old neighbour is gone" {
+	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
+	WIDGET_STATE="$BATS_TEST_TMPDIR/pos.json"
+	echo '{"bar":{"layout":{"right":[{"id":"a"},{"id":"taylorburke.sudo-watch"},{"id":"b"}]}}}' > "$SHELL_CONFIG"
+	main widget off >/dev/null
+	echo '{"bar":{"layout":{"right":[{"id":"b"},{"id":"z"}]}}}' > "$SHELL_CONFIG"
+	main widget on >/dev/null
+	jq -e '.bar.layout.right | map(.id) == ["b","z","taylorburke.sudo-watch"]' "$SHELL_CONFIG"
+}
+
+@test "widget on: ignores a corrupt or mismatched saved position" {
+	SHELL_CONFIG="$BATS_TEST_TMPDIR/shell.json"
+	WIDGET_STATE="$BATS_TEST_TMPDIR/pos.json"
+	echo '{"bar":{"layout":{"right":[{"id":"a"}]}}}' > "$SHELL_CONFIG"
+	echo '{"section":"../../etc","entry":{"id":"evil"},"after":null}' > "$WIDGET_STATE"
+	run main widget on
+	[ "$status" -eq 0 ]
+	jq -e '.bar.layout.right | map(.id) == ["a","taylorburke.sudo-watch"]' "$SHELL_CONFIG"
+	jq -e '.bar.layout | keys == ["right"]' "$SHELL_CONFIG"
 }
 
 @test "widget: rejects an unknown argument" {
