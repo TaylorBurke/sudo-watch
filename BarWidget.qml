@@ -177,66 +177,116 @@ BarWidget {
         onClicked: { root.escalate = !root.escalate; root.run(["escalate", root.escalate ? "on" : "off"]) }
       }
 
-      NumberField {
+      // Two settings per row, each in a half-width cell, so the popup stays
+      // compact instead of leaving the right half of every row empty.
+      Row {
         visible: root.escalate
         width: parent.width
-        label: "Step (%)"
-        from: 0
-        to: 100
-        value: root.volumeStep
-        foreground: root.bar.foreground
-        onModified: function(v) { root.volumeStep = v; root.run(["volume-step", String(v)]) }
-      }
-      NumberField {
-        visible: root.escalate
-        width: parent.width
-        label: "Cap (%)"
-        from: 0
-        to: 300
-        value: root.volumeMax
-        foreground: root.bar.foreground
-        onModified: function(v) { root.volumeMax = v; root.run(["volume-max", String(v)]) }
+        spacing: Style.space(8)
+
+        Item {
+          width: (parent.width - parent.spacing) / 2
+          height: stepField.implicitHeight
+          NumberField {
+            id: stepField
+            label: "Step %"
+            from: 0
+            to: 100
+            value: root.volumeStep
+            foreground: root.bar.foreground
+            onModified: function(v) { root.volumeStep = v; root.run(["volume-step", String(v)]) }
+          }
+        }
+        Item {
+          width: (parent.width - parent.spacing) / 2
+          height: capField.implicitHeight
+          NumberField {
+            id: capField
+            label: "Cap %"
+            from: 0
+            to: 500
+            value: root.volumeMax
+            foreground: root.bar.foreground
+            onModified: function(v) { root.volumeMax = v; root.run(["volume-max", String(v)]) }
+          }
+        }
       }
 
       PanelSeparator { foreground: root.bar.foreground }
 
-      NumberField {
+      Row {
         width: parent.width
-        label: "First alert after (s)"
-        from: 1
-        to: 3600
-        value: root.threshold
-        foreground: root.bar.foreground
-        onModified: function(v) { root.threshold = v; root.run(["threshold", String(v)]) }
-      }
-      NumberField {
-        width: parent.width
-        label: "Repeat every (s)"
-        from: 1
-        to: 3600
-        value: root.repeatEvery
-        foreground: root.bar.foreground
-        onModified: function(v) { root.repeatEvery = v; root.run(["repeat", String(v)]) }
+        spacing: Style.space(8)
+
+        Item {
+          width: (parent.width - parent.spacing) / 2
+          height: thresholdField.implicitHeight
+          NumberField {
+            id: thresholdField
+            label: "First (s)"
+            from: 1
+            to: 3600
+            value: root.threshold
+            foreground: root.bar.foreground
+            onModified: function(v) { root.threshold = v; root.run(["threshold", String(v)]) }
+          }
+        }
+        Item {
+          width: (parent.width - parent.spacing) / 2
+          height: repeatField.implicitHeight
+          NumberField {
+            id: repeatField
+            label: "Repeat (s)"
+            from: 1
+            to: 3600
+            value: root.repeatEvery
+            foreground: root.bar.foreground
+            onModified: function(v) { root.repeatEvery = v; root.run(["repeat", String(v)]) }
+          }
+        }
       }
 
-      NumberField {
+      Row {
         width: parent.width
-        label: root.maxAlerts === 0 ? "Max alerts (0 = unlimited)" : "Max alerts per prompt"
-        from: 0
-        to: 1000
-        value: root.maxAlerts
-        foreground: root.bar.foreground
-        onModified: function(v) { root.maxAlerts = v; root.run(["max-alerts", v === 0 ? "unlimited" : String(v)]) }
+        spacing: Style.space(8)
+
+        Item {
+          width: (parent.width - parent.spacing) / 2
+          height: Math.max(maxAlertsField.implicitHeight, testButton.implicitHeight)
+          NumberField {
+            id: maxAlertsField
+            anchors.verticalCenter: parent.verticalCenter
+            label: "Max alerts"
+            from: 0
+            to: 1000
+            value: root.maxAlerts
+            foreground: root.bar.foreground
+            onModified: function(v) { root.maxAlerts = v; root.run(["max-alerts", v === 0 ? "unlimited" : String(v)]) }
+          }
+        }
+        Item {
+          width: (parent.width - parent.spacing) / 2
+          height: Math.max(maxAlertsField.implicitHeight, testButton.implicitHeight)
+          Button {
+            id: testButton
+            anchors.centerIn: parent
+            iconText: "󰕾"
+            text: "Test sound"
+            foreground: root.bar.foreground
+            horizontalPadding: Style.spacing.controlPaddingX
+            verticalPadding: Style.spacing.controlPaddingY
+            onClicked: root.run(["test"])
+          }
+        }
       }
 
-      Button {
-        anchors.horizontalCenter: parent.horizontalCenter
-        iconText: "󰕾"
-        text: "Test sound"
-        foreground: root.bar.foreground
-        horizontalPadding: Style.spacing.controlPaddingX
-        verticalPadding: Style.spacing.controlPaddingY
-        onClicked: root.run(["test"])
+      Text {
+        textFormat: Text.PlainText
+        visible: root.maxAlerts === 0
+        text: "Max alerts 0 = unlimited"
+        color: Qt.darker(root.bar.foreground, 1.6)
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.caption
       }
     }
   }
