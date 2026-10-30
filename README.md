@@ -6,6 +6,8 @@ desktop notification and plays a sound, repeating every 10 seconds until
 you respond, the process goes away, or the per-prompt alert limit is
 reached (10 by default, or unlimited if you prefer).
 
+![sudo-watch notifications for a sudo prompt left waiting](docs/screenshot.png)
+
 ## How it works
 
 Every 2 seconds it polls for `sudo`/`pkexec` processes. A process counts as
